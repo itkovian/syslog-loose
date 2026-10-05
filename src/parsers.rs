@@ -4,7 +4,7 @@ use nom::{
     character::complete::digit1,
     combinator::map_res,
     error::{make_error, ErrorKind},
-    Err, IResult,
+    Err, IResult, Parser as _,
 };
 use std::str::FromStr;
 
@@ -12,21 +12,29 @@ pub(crate) fn digits<T>(input: &str) -> IResult<&str, T>
 where
     T: FromStr,
 {
-    map_res(digit1, FromStr::from_str)(input)
+    map_res(digit1, FromStr::from_str).parse(input)
+}
+
+struct ParserOpts {
+    has_colons: bool,
+    has_trailing_colon: bool,
 }
 
 /// Parse either a string up to white space or a ':'.
 /// If the string is '-' this is taken to be an empty value.
-fn optional(input: &str, has_colons: bool) -> IResult<&str, Option<&str>> {
+fn optional(input: &str, opts: ParserOpts) -> IResult<&str, Option<&str>> {
     let (remaining, value) =
-        take_while1(|c: char| !c.is_whitespace() && (has_colons || c != ':'))(input)?;
+        take_while1(|c: char| !c.is_whitespace() && (opts.has_colons || c != ':'))(input)?;
 
     if value.trim() == ":" {
         // A colon by itself indicates we are at the separator between headers and message.
         Err(Err::Error(make_error(input, ErrorKind::Fail)))
-    } else if value.ends_with(':') {
-        // If the field ends with a colon, the colon should be treated as the separator between
-        // the headers and the message, we return the field but leave the separator.
+    } else if value.ends_with(':') && !value.ends_with("::") && !opts.has_trailing_colon {
+        // If the field ends with a single colon, the colon should be treated as the separator
+        // between the headers and the message, we return the field but leave the separator.
+        //
+        // A field ending in a double colon is left intact, since that is a valid (if unusual)
+        // rendering of an IPv6 address, e.g. `fe80::` or `2600:1f14:247e:5804:29e3::`.
         let split = value.len() - 1;
         Ok((&input[split..], Some(&value[0..split])))
     } else if value == "-" || value.is_empty() {
@@ -39,27 +47,57 @@ fn optional(input: &str, has_colons: bool) -> IResult<&str, Option<&str>> {
 
 /// Parse the host name or ip address.
 pub(crate) fn hostname(input: &str) -> IResult<&str, Option<&str>> {
-    optional(input, true)
+    optional(
+        input,
+        ParserOpts {
+            has_colons: true,
+            has_trailing_colon: false,
+        },
+    )
 }
 
 // Parse the tagname
 pub(crate) fn tagname(input: &str) -> IResult<&str, Option<&str>> {
-    optional(input, false)
+    optional(
+        input,
+        ParserOpts {
+            has_colons: false,
+            has_trailing_colon: true,
+        },
+    )
 }
 
 /// Parse the app name
 pub(crate) fn appname(input: &str) -> IResult<&str, Option<&str>> {
-    optional(input, true)
+    optional(
+        input,
+        ParserOpts {
+            has_colons: true,
+            has_trailing_colon: true,
+        },
+    )
 }
 
 /// Parse the Process Id
 pub(crate) fn procid(input: &str) -> IResult<&str, Option<&str>> {
-    optional(input, true)
+    optional(
+        input,
+        ParserOpts {
+            has_colons: true,
+            has_trailing_colon: true,
+        },
+    )
 }
 
 /// Parse the Message Id
 pub(crate) fn msgid(input: &str) -> IResult<&str, Option<&str>> {
-    optional(input, true)
+    optional(
+        input,
+        ParserOpts {
+            has_colons: true,
+            has_trailing_colon: true,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -68,7 +106,16 @@ mod tests {
 
     #[test]
     fn parse_optional_exclamations() {
-        assert_eq!(optional("!!!", true), Ok(("", Some("!!!"))));
+        assert_eq!(
+            optional(
+                "!!!",
+                ParserOpts {
+                    has_colons: true,
+                    has_trailing_colon: true,
+                }
+            ),
+            Ok(("", Some("!!!")))
+        );
     }
 
     #[test]
@@ -93,5 +140,16 @@ mod tests {
     #[test]
     fn trailing_colon() {
         assert_eq!(hostname("zork: "), Ok((": ", Some("zork"))))
+    }
+
+    #[test]
+    fn hostname_ipv6_trailing_double_colon() {
+        // IPv6 addresses that end in `::` must not have their final colon stripped as if
+        // it were the header/message separator.
+        assert_eq!(
+            hostname("2600:1f14:247e:5804:29e3:: "),
+            Ok((" ", Some("2600:1f14:247e:5804:29e3::")))
+        );
+        assert_eq!(hostname("fe80:: "), Ok((" ", Some("fe80::"))));
     }
 }

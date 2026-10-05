@@ -44,12 +44,20 @@ impl Arbitrary for Wrapper<Message<String>> {
         let priority: u8 = u8::arbitrary(g) % 192;
         let (facility, severity) = decompose_pri(priority);
         let msg: String = Arbitrary::arbitrary(g);
-        let structured_data: Vec<Wrapper<StructuredElement<String>>> = Arbitrary::arbitrary(g);
+        let mut structured_data: Vec<Wrapper<StructuredElement<String>>> = Arbitrary::arbitrary(g);
         let protocol = if Arbitrary::arbitrary(g) {
             Protocol::RFC3164
         } else {
             Protocol::RFC5424(1)
         };
+
+        // 3164 can't take empty structured data elements, so filter them out.
+        if protocol == Protocol::RFC3164 {
+            structured_data = structured_data
+                .into_iter()
+                .filter(|element| !element.0.params.is_empty())
+                .collect();
+        }
 
         let (appname, procid, msgid) = match protocol {
             Protocol::RFC3164 => {
@@ -85,11 +93,11 @@ impl Arbitrary for Wrapper<Message<String>> {
         // if `nsecs` is out of range. This happens when `nsecs` is equivalent
         // to a number of days greater than the `i32::MAX`. If we limit `secs`
         // to i32 itself this can't happen.
-        let secs: i32 = i32::arbitrary(g);
+        let secs: Option<i32> = Option::arbitrary(g);
         Wrapper(Message {
             facility,
             severity,
-            timestamp: Some(Utc.timestamp_opt(secs as i64, 0).unwrap().into()),
+            timestamp: secs.map(|secs| Utc.timestamp_opt(secs as i64, 0).unwrap().into()),
             hostname,
             appname,
             procid,
@@ -161,7 +169,7 @@ impl Arbitrary for Wrapper<ProcId<String>> {
             loop {
                 let name: ProcIdString = Arbitrary::arbitrary(g);
                 let ProcIdString(inner) = &name;
-                // A `ProdIdString` is ambiguous to the parser if it's all digit
+                // A `ProcIdString` is ambiguous to the parser if it's all digit
                 // characters, like "8". We have try to parse the result into an
                 // i32 and if it succeeds then this generated ProcIdString will
                 // be confused for a ProdId::PID on parsing.

@@ -1,6 +1,6 @@
 [package]
 name = "syslog_loose"
-version = "0.21.0"
+version = "0.23.0"
 authors = ["Stephen Wakely <fungus.humungus@gmail.com>"]
 description = "A loose parser for syslog messages."
 license = "MIT"
@@ -12,13 +12,13 @@ readme = "README.md"
 edition = "2018"
 
 [dependencies]
-nom = "7.1"
+nom = "8.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [dev-dependencies]
 chrono-tz = "0.10"
-criterion = "0.5.1"
-criterion-cycles-per-byte = "0.6.0"
+criterion = "0.8.0"
+criterion-cycles-per-byte = "0.8.0"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.0.0"
 
